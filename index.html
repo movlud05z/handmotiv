@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="az">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Dəqiq İdarəetmə Sistemi</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+
+    <style>
+        :root {
+            --c: #00d2ff;
+        }
+
+        body {
+            margin: 0;
+            background: #05050a;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+
+        /* Kamera - Sağ üstdə kiçik */
+        #input_video {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 200px;
+            height: 150px;
+            border: 3px solid var(--c);
+            border-radius: 12px;
+            transform: scaleX(-1);
+            z-index: 100;
+            object-fit: cover;
+        }
+
+        #output_canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            transform: scaleX(-1);
+            z-index: 5;
+        }
+
+        #sphere {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, var(--c), #000);
+            box-shadow: 0 0 50px var(--c);
+            transition: width 0.1s, height 0.1s, background 0.3s;
+        }
+
+        .info-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 30px;
+            border: 1px solid var(--c);
+            z-index: 50;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <video id="input_video" autoplay></video>
+    <canvas id="output_canvas"></canvas>
+    <div id="sphere"></div>
+
+    <div class="info-panel">
+        <div>REJİM: <b id="mode-text" style="color: var(--c);">KÜRƏ</b></div>
+        <div style="font-size: 11px; margin-top: 5px;">
+            Dəyişmək üçün: <b>Əlini ekranın kənarlarına (sağ/sol) apar!</b><br>
+            Rəng üçün: <b>Barmaqlarını birləşdir!</b>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const sphere = document.getElementById('sphere');
+        const modeLabel = document.getElementById('mode-text');
+
+        let currentMode = 'sphere';
+        let lastActionTime = 0;
+        const colors = ['#00d2ff', '#ff4757', '#2ed573', '#ffa502', '#a29bfe', '#ffffff'];
+        let colorIdx = 0;
+
+        function updateColor() {
+            colorIdx = (colorIdx + 1) % colors.length;
+            document.documentElement.style.setProperty('--c', colors[colorIdx]);
+        }
+
+        function onResults(results) {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+                const landmarks = results.multiHandLandmarks[0];
+                const wrist = landmarks[0]; // Bilək koordinatı
+                const now = Date.now();
+
+                // --- 1. KEÇİD MƏNTİQİ (Ekran kənarı ilə) ---
+                // Əgər əl ekranın 15%-dən çox sağda və ya soldadırsa keçid et
+                if ((wrist.x < 0.15 || wrist.x > 0.85) && (now - lastActionTime > 1500)) {
+                    currentMode = (currentMode === 'sphere') ? 'sticker' : 'sphere';
+                    modeLabel.innerText = currentMode === 'sphere' ? 'KÜRƏ' : 'STİKER';
+                    lastActionTime = now;
+                }
+
+                // --- 2. RƏNG VƏ ÖLÇÜ ---
+                const thumb = landmarks[4];
+                const index = landmarks[8];
+                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+
+                if (currentMode === 'sphere') {
+                    sphere.style.display = 'block';
+
+                    // Barmaqlar birləşəndə rəng dəyişsin
+                    if (dist < 0.05 && (now - lastActionTime > 700)) {
+                        updateColor();
+                        lastActionTime = now;
+                    }
+
+                    const size = Math.max(40, dist * 1100);
+                    sphere.style.width = size + 'px';
+                    sphere.style.height = size + 'px';
+                } else {
+                    sphere.style.display = 'none';
+                    const c = getComputedStyle(document.documentElement).getPropertyValue('--c');
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: c, lineWidth: 5 });
+                    drawLandmarks(canvasCtx, landmarks, { color: '#fff', radius: 4 });
+                }
+            }
+        }
+
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({ image: videoElement }); },
+            width: 640, height: 480
+        });
+        camera.start();
+    </script>
+</body>
+
+</html>
